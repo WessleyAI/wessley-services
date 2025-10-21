@@ -1,0 +1,49 @@
+{
+  "model": {
+    "id": "model_1760966166278",
+    "vehicleSignature": "pajero_pinin_2001",
+    "generatedAt": "2025-10-20T13:16:06.278Z",
+    "version": "1.0.0"
+  },
+  "statistics": {
+    "componentCount": 187,
+    "connectionCount": 41,
+    "totalWireLength": 1250.5,
+    "processingTime": 5500,
+    "fileSize": 2202009.6
+  },
+  "quality": {
+    "spatialCoverage": 100,
+    "connectionIntegrity": 100,
+    "geometryQuality": 95,
+    "overallScore": 98.3
+  },
+  "components": {
+    "byType": {
+      "relay": 15,
+      "fuse": 42,
+      "connector": 89,
+      "sensor": 23,
+      "ecu": 8,
+      "switch": 10
+    },
+    "withSpatialData": 187,
+    "withoutSpatialData": 0
+  },
+  "technical": {
+    "coordinate_system": "right_handed",
+    "units": "millimeters",
+    "origin": "vehicle_center",
+    "scale": 1,
+    "optimization_level": "high"
+  },
+  "compatibility": {
+    "threejs_version": "^0.158.0",
+    "gltf_version": "2.0",
+    "supported_loaders": [
+      "GLTFLoader",
+      "DRACOLoader"
+    ],
+    "required_extensions": []
+  }
+}

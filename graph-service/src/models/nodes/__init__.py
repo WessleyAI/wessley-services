@@ -1,0 +1,1 @@
+# Node models for Neo4j graph entities

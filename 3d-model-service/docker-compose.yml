@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # 3D Model Service
+  model-service:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - NEO4J_URI=bolt://neo4j:7687
+      - REDIS_HOST=redis
+      - S3_ENDPOINT=http://minio:9000
+      - S3_FORCE_PATH_STYLE=true
+    depends_on:
+      - neo4j
+      - redis
+      - minio
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - wessley-network
+
+  # Neo4j Database
+  neo4j:
+    image: neo4j:5.12-community
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_PLUGINS=["graph-data-science", "apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+    networks:
+      - wessley-network
+
+  # Redis Cache and Queue
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - wessley-network
+
+  # MinIO (S3-compatible storage)
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - wessley-network
+
+  # Create MinIO bucket
+  minio-client:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set minio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb minio/wessley-3d-models;
+      /usr/bin/mc policy set public minio/wessley-3d-models;
+      exit 0;
+      "
+    networks:
+      - wessley-network
+
+  # Redis UI (Optional)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - wessley-network
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_import:
+  redis_data:
+  minio_data:
+
+networks:
+  wessley-network:
+    driver: bridge

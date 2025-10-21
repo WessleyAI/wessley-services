@@ -1,0 +1,237 @@
+version: '3.8'
+
+services:
+  learning-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: learning-service
+    ports:
+      - "8000:8000"
+      - "50051:50051"
+    environment:
+      # Service Configuration
+      - SERVICE_NAME=learning-service
+      - SERVICE_VERSION=1.0.0
+      - LOG_LEVEL=INFO
+      
+      # Database Configuration
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/learning_db
+      - REDIS_URL=redis://redis:6379/0
+      
+      # MLflow Configuration
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_ARTIFACT_ROOT=/data/mlflow/artifacts
+      
+      # Ray Configuration
+      - RAY_ADDRESS=ray://ray-head:10001
+      - RAY_NAMESPACE=learning-service
+      
+      # GPU Support (if available)
+      - CUDA_VISIBLE_DEVICES=0
+      
+      # Model Paths
+      - MODEL_CACHE_DIR=/app/models
+      - DATA_CACHE_DIR=/app/data
+      
+      # gRPC Configuration
+      - GRPC_PORT=50051
+      - GRPC_MAX_WORKERS=10
+      
+      # API Configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_WORKERS=4
+      
+      # Optimization Settings
+      - MAX_OPTIMIZATION_TIME=300
+      - DEFAULT_WORKSPACE_BOUNDS=500,500,300
+      
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./cache:/app/cache
+      - mlflow-artifacts:/data/mlflow/artifacts
+    
+    depends_on:
+      - postgres
+      - redis
+      - mlflow
+      - ray-head
+    
+    networks:
+      - learning-network
+    
+    restart: unless-stopped
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: learning-postgres
+    environment:
+      - POSTGRES_DB=learning_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - learning-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: learning-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - learning-network
+    restart: unless-stopped
+
+  mlflow:
+    image: python:3.11-slim
+    container_name: learning-mlflow
+    command: >
+      sh -c "
+        pip install mlflow psycopg2-binary &&
+        mlflow server 
+          --backend-store-uri postgresql://postgres:postgres@postgres:5432/learning_db
+          --default-artifact-root /data/mlflow/artifacts
+          --host 0.0.0.0
+          --port 5000
+      "
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_TRACKING_URI=postgresql://postgres:postgres@postgres:5432/learning_db
+    volumes:
+      - mlflow-artifacts:/data/mlflow/artifacts
+    depends_on:
+      - postgres
+    networks:
+      - learning-network
+    restart: unless-stopped
+
+  ray-head:
+    image: rayproject/ray:2.6.0-py311
+    container_name: learning-ray-head
+    command: >
+      ray start --head 
+        --dashboard-host=0.0.0.0 
+        --dashboard-port=8265 
+        --port=6379 
+        --redis-password='' 
+        --block
+    ports:
+      - "8265:8265"  # Ray Dashboard
+      - "10001:10001"  # Ray Client
+      - "6380:6379"   # Ray Redis
+    volumes:
+      - ray-data:/tmp/ray
+    networks:
+      - learning-network
+    restart: unless-stopped
+    environment:
+      - RAY_DISABLE_IMPORT_WARNING=1
+
+  ray-worker:
+    image: rayproject/ray:2.6.0-py311
+    command: >
+      ray start 
+        --address=ray-head:6379 
+        --redis-password='' 
+        --block
+    depends_on:
+      - ray-head
+    volumes:
+      - ray-data:/tmp/ray
+    networks:
+      - learning-network
+    restart: unless-stopped
+    environment:
+      - RAY_DISABLE_IMPORT_WARNING=1
+    scale: 2  # Start 2 worker nodes
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: learning-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - learning-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: learning-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - learning-network
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: learning-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - learning-service
+    networks:
+      - learning-network
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  mlflow-artifacts:
+  ray-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  learning-network:
+    driver: bridge
