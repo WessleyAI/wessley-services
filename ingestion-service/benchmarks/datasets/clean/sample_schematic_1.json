@@ -1,0 +1,116 @@
+{
+  "filename": "sample_schematic_1.pdf",
+  "description": "Simple resistor-capacitor circuit with basic components",
+  "pages": 1,
+  "category": "clean",
+  "components": [
+    {
+      "id": "R1",
+      "type": "resistor",
+      "value": "10k",
+      "bbox": [150, 200, 180, 230],
+      "page": 1
+    },
+    {
+      "id": "C1", 
+      "type": "capacitor",
+      "value": "100nF",
+      "bbox": [250, 200, 280, 230],
+      "page": 1
+    },
+    {
+      "id": "U1",
+      "type": "ic",
+      "value": "74HC04",
+      "bbox": [350, 180, 400, 250], 
+      "page": 1
+    }
+  ],
+  "nets": [
+    {
+      "name": "VCC",
+      "connections": [
+        {"component": "R1", "pin": "1"},
+        {"component": "U1", "pin": "14"}
+      ]
+    },
+    {
+      "name": "INPUT",
+      "connections": [
+        {"component": "R1", "pin": "2"},
+        {"component": "C1", "pin": "1"},
+        {"component": "U1", "pin": "1"}
+      ]
+    },
+    {
+      "name": "OUTPUT", 
+      "connections": [
+        {"component": "U1", "pin": "2"}
+      ]
+    },
+    {
+      "name": "GND",
+      "connections": [
+        {"component": "C1", "pin": "2"},
+        {"component": "U1", "pin": "7"}
+      ]
+    }
+  ],
+  "text_regions": [
+    {
+      "text": "R1",
+      "bbox": [140, 180, 155, 195],
+      "page": 1
+    },
+    {
+      "text": "10k",
+      "bbox": [140, 235, 165, 250],
+      "page": 1
+    },
+    {
+      "text": "C1",
+      "bbox": [240, 180, 255, 195],
+      "page": 1
+    },
+    {
+      "text": "100nF",
+      "bbox": [230, 235, 270, 250],
+      "page": 1
+    },
+    {
+      "text": "U1",
+      "bbox": [360, 160, 375, 175],
+      "page": 1
+    },
+    {
+      "text": "74HC04",
+      "bbox": [340, 255, 385, 270],
+      "page": 1
+    },
+    {
+      "text": "VCC",
+      "bbox": [100, 150, 125, 165],
+      "page": 1
+    },
+    {
+      "text": "GND",
+      "bbox": [100, 300, 125, 315],
+      "page": 1
+    },
+    {
+      "text": "INPUT",
+      "bbox": [50, 200, 85, 215],
+      "page": 1
+    },
+    {
+      "text": "OUTPUT",
+      "bbox": [450, 200, 495, 215],
+      "page": 1
+    }
+  ],
+  "expected_metrics": {
+    "min_cer": 0.05,
+    "min_wer": 0.10,
+    "min_f1": 0.85
+  }
+}

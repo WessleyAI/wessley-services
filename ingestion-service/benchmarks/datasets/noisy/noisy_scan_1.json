@@ -1,0 +1,94 @@
+{
+  "filename": "noisy_scan_1.pdf",
+  "description": "Scanned circuit with skew and noise artifacts",
+  "pages": 1,
+  "category": "noisy",
+  "scan_quality": "low",
+  "artifacts": ["skew", "noise", "blur", "contrast_issues"],
+  "components": [
+    {
+      "id": "R2",
+      "type": "resistor", 
+      "value": "1k",
+      "bbox": [120, 180, 145, 210],
+      "page": 1,
+      "visibility": "partial"
+    },
+    {
+      "id": "L1",
+      "type": "inductor",
+      "value": "10mH", 
+      "bbox": [220, 160, 260, 200],
+      "page": 1,
+      "visibility": "good"
+    },
+    {
+      "id": "D1",
+      "type": "diode",
+      "value": "1N4007",
+      "bbox": [320, 170, 360, 210],
+      "page": 1,
+      "visibility": "poor"
+    }
+  ],
+  "nets": [
+    {
+      "name": "VIN",
+      "connections": [
+        {"component": "R2", "pin": "1"},
+        {"component": "L1", "pin": "1"}
+      ]
+    },
+    {
+      "name": "VOUT",
+      "connections": [
+        {"component": "L1", "pin": "2"},
+        {"component": "D1", "pin": "1"}
+      ]
+    }
+  ],
+  "text_regions": [
+    {
+      "text": "R2",
+      "bbox": [115, 155, 130, 170],
+      "page": 1,
+      "quality": "degraded"
+    },
+    {
+      "text": "1k",
+      "bbox": [115, 215, 135, 230],
+      "page": 1,
+      "quality": "poor"
+    },
+    {
+      "text": "L1", 
+      "bbox": [230, 140, 245, 155],
+      "page": 1,
+      "quality": "good"
+    },
+    {
+      "text": "10mH",
+      "bbox": [215, 205, 250, 220],
+      "page": 1,
+      "quality": "fair"
+    },
+    {
+      "text": "D1",
+      "bbox": [325, 145, 340, 160],
+      "page": 1,
+      "quality": "poor"
+    },
+    {
+      "text": "1N4007",
+      "bbox": [310, 215, 355, 230],
+      "page": 1,
+      "quality": "very_poor"
+    }
+  ],
+  "expected_metrics": {
+    "min_cer": 0.15,
+    "min_wer": 0.25,
+    "min_f1": 0.65
+  },
+  "notes": "This sample tests OCR robustness against scan artifacts and poor image quality"
+}
