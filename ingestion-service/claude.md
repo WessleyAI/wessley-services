@@ -428,3 +428,318 @@ Add any clarifications you need to `OPEN_QUESTION.md`. Examples:
    * `netlist.json` (nets > 5, no dangling pins > 15%)
 5. Neo4j shows `Component`/`Net` nodes; Qdrant searchable chunk count > 100.
 6. Benchmarks entry written with CER < 5% and struct_accuracy > 0.8 on clean set.
+
+# PATCH — Integrated Semantic Search & Learning Loop (Automotive-Electronics Focus)
+
+Scope: Keep everything inside the Data Ingestion service (no new microservices). Add a robust semantic layer and a continual-learning loop that improves symbol detection, OCR fusion, and schematic understanding as more documents are processed.
+
+## 0) Goals
+
+Build a growing domain model for automotive electronics (components, pins, nets, harnesses, locations, failure modes).
+
+Better answers over time: every newly ingested manual/schematic boosts retrieval, parsing accuracy, and reasoning.
+
+Zero downtime iteration: new models/heuristics are trained offline and atomically promoted via a registry version.
+
+## 1) Domain Ontology & Object Model (v0.1)
+
+Define a minimal automotive electronics ontology to normalize everything we extract:
+
+Entities
+
+Vehicle { make, model, year, market }
+
+System { name, e.g., “Starting”, “Lighting”, “Fuel Pump” }
+
+Component { id/ref, type(enum), value, rating, location_hint }
+
+Pin { name, index, electrical_role(enum: power, ground, signal, can_h, can_l) }
+
+Net { name, voltage_hint, bus(enum: CAN, LIN, K-line) }
+
+Connector { code, cavity_count, location_hint }
+
+Ground { code, chassis_location }
+
+Fuse/Relay { rating, slot, panel }
+
+Wire { gauge, color_code, route_hint }
+
+Relations
+
+(Component)-[:HAS_PIN]->(Pin)
+
+(Pin)-[:ON_NET]->(Net)
+
+(Component)-[:BELONGS_TO]->(System)
+
+(Component)-[:IN_VEHICLE]->(Vehicle)
+
+(Connector)-[:HOSTS_PIN]->(Pin)
+
+(Ground)-[:RETURNS_NET]->(Net)
+
+(Fuse|Relay)-[:PROTECTS]->(Net|Component)
+
+Keep ontology extensible; don’t overfit early.
+
+## 2) Semantic Layer (Embedded)
+### 2.1 Multi-Vector Indexing Strategy
+
+Dense embeddings: two fields per chunk
+
+semantic_text (OCR spans merged by layout; 256–512 tokens)
+
+symbolic_context (symbol types, nets, nearby components serialized as text)
+
+Sparse (lexical) index: postgres tsvector (BM25-like) for exact terms: “J/B No.1”, “IG1”, “EFI MAIN”, “GND-108”.
+
+Hybrid search: topk_dense ∪ topk_sparse → cross-encoder re-ranker (tiny).
+
+### 2.2 Chunking Rules
+
+Prefer layout blocks (same font/size, proximity) over fixed tokens.
+
+Attach structured anchors to each chunk: {vehicle_signature, page, bbox, component_ids[], net_names[], system}.
+
+### 2.3 Payload (Qdrant/pgvector)
+{
+  "id": "span_8f…",
+  "project_id": "uuid",
+  "vehicle": {"make":"Hyundai","model":"Galloper","year":2000},
+  "page": 3,
+  "bbox": [x1,y1,x2,y2],
+  "text": "Starter relay circuit operation...",
+  "symbolic_context": "relay K1, net IG1, fuse F10 30A, ground G102",
+  "component_ids": ["K1","F10"],
+  "net_names": ["IG1","BATT"],
+  "embedding_sem": [ ... ],
+  "embedding_sym": [ ... ],
+  "ts_lex": "starter & relay & ig1 & f10"
+}
+
+### 2.4 API
+
+GET /v1/search?q=...&project_id=...&vehicle=...&filters=...
+Returns merged hits: spans + components + nets (w/ reasons).
+
+## 3) Learning Loop (Continual)
+### 3.1 Data Sources (growing corpora)
+
+Parsed schematics (images + derived labels)
+
+Workshop manuals (PDF → OCR chunks)
+
+Fuse/relay charts (tables → normalized)
+
+Harness layout pages (diagrams → location hints)
+
+User corrections / adjudications from UI (later)
+
+### 3.2 Signals Collected Automatically
+
+OCR late-fusion disagreements
+
+Symbol detector false positives/negatives (via geometry + net consistency checks)
+
+Net propagation conflicts (label collisions, dangling pins)
+
+Search click-through / dwell time (when integrated with web app)
+
+### 3.3 Training Tasks (no human labels required at first)
+
+Self-supervised text:
+
+Contrastive learning across duplicate spans (same paragraph, different scans), and between text vs symbolic_context.
+
+Weakly-supervised symbol detection:
+
+Bootstrap small golden set; augment with geometry rules (junction vs crossing, pin counts).
+
+Sequence tagging for electrical tokens:
+
+BIO tagging of NET, COMP_ID, RATING, FUSE_SLOT, GROUND_CODE based on regex+rules → use as noisy labels.
+
+Graph consistency losses:
+
+Penalize component types whose pins consistently violate learned role priors (e.g., op-amp must have power pins on VCC/VEE).
+
+Distillation:
+
+Use a strong VLM offline to label 100–500 pages/month; distill into efficient runtime models.
+
+### 3.4 Model Zoo (lightweight & swappable)
+
+Embeddings: sentence-transformer-class (384–768 dims) fine-tuned on manuals (contrastive).
+
+Re-ranker: cross-encoder tiny (≤ 50M params).
+
+Tagger: BiLSTM/CRF or tiny Transformer for token tagging (electrical entities).
+
+Detector: YOLOv8n/s or D2-R50 for symbols; class set versioned: symset_v1.
+
+Heuristics: rule packs with weights (learnable thresholds).
+
+### 3.5 Curriculum
+
+Start with clean printed schematics (vector-to-raster).
+
+Add noisy scans (deskewed).
+
+Add photos of manuals (phone glare etc.).
+
+Add multilingual (labels often English, but region terms differ).
+
+# 3.6 Versioning & Promotion
+
+Track via model_registry (Supabase):
+
+{
+  "name": "symbol_detector",
+  "version": "1.3.2",
+  "s3_uri": "s3://…/detector_v1.3.2.pt",
+  "metrics": {"mAP":0.78,"net_F1":0.72},
+  "stage": "staging|prod",
+  "changelog": "junction rule fix; pin IO prior"
+}
+
+
+Blue/Green load by tag CURRENT_PROD_*.
+
+Auto-rollback if error budget exceeded (see §6).
+
+## 4) Quality & Evaluation
+### 4.1 Metrics
+
+OCR: CER/WER overall + for rotated/condensed fonts.
+
+Symbols: mAP@[.5:.75], per-class recall (pay attention to junction, net_label).
+
+Connectivity: Net membership accuracy, dangling-pin rate, cross-short false alarms.
+
+Search: NDCG@10, Recall@50, MRR (per query template: “Where is starter relay?”, “Which fuse protects ECU?”).
+
+E2E F1: 0.4Text + 0.3Symbols + 0.3*Connectivity.
+
+### 4.2 Regression Suite
+
+benchmarks/run.py --full
+
+Clean vs Noisy subsets
+
+Reports saved under benchmarks/results/{date}.json and summarized to Markdown.
+
+### 4.3 Error Mining
+
+Nightly job flags:
+
+Low-confidence nets with high impact systems (Starting, Charging).
+
+Consistent mismatches between tagger and detector (e.g., token says “F18” but no fuse box adjacency).
+
+Candidate pages for manual adjudication.
+
+## 5) Knowledge Consolidation
+### 5.1 Normalization Tables (Supabase)
+
+component_types(id, name, pin_roles[], typical_values[])
+
+fuse_panels(vehicle_signature, panel_name, slot_map jsonb)
+
+grounds(vehicle_signature, code, location_hint)
+
+wires(color_code, gauge_awg, typical_role)
+
+### 5.2 Graph Sanity Constraints (checked before Neo4j write)
+
+Junctions must create ≥3 incident segments.
+
+Net labels must not create cycles with conflicting voltages.
+
+Power nets must reach at least one fuse/relay unless marked direct_batt.
+
+## 6) Ops & Safety
+
+Shadow evaluation: new model versions run in shadow for X% of jobs and log deltas only.
+
+Guardrails: if E2E F1 drops by >5% vs baseline over last 100 pages → auto-rollback.
+
+Resource control: detectors on CPU-first; batch on GPU when present; rate-limit per tenant.
+
+Privacy/licensing: store features only for proprietary manuals if required; retain raw pages behind signed URLs.
+
+## 7) Implementation Tasks (Patch Adds)
+
+Semantic Module
+
+ src/semantic/embed.py (multi-head embeddings)
+
+ src/semantic/search.py (hybrid, rerank)
+
+ GET /v1/search returns mixed hits with reasons
+
+ Migrate payload schema (add symbolic_context, component_ids, net_names, ts_lex)
+
+Learning Jobs
+
+ cron/weekly_eval.py → runs full bench, writes model_registry
+
+ cron/self_train_text.py → contrastive fine-tune embeddings on mined positives
+
+ cron/weak_label_tokens.py → generate noisy BIO labels from rules
+
+ cron/detector_refresh.py → fine-tune YOLO on error-mined patches
+
+Model Registry & Hot-Load
+
+ src/core/models.py → download by tag, warm-up, health checks
+
+ Supabase trigger to signal model_version_change → hot-reload
+
+Consistency Validators
+
+ src/schematics/validate.py → pre-Neo4j checks
+
+ Failure → artifacts to artifacts/triage/… with overlay PNG
+
+Bench & Telemetry
+
+ Expand benchmarks/run.py for NDCG/MRR + E2E F1
+
+ Prometheus counters for: CER moving avg, net_accuracy, search_ndcg
+
+## 8) Sample Config
+semantic:
+  dense_model: "wsl/auto-elec-embed-v0.3"
+  dense_dim: 512
+  re_ranker: "wsl/auto-elec-rerank-tiny"
+  use_pgvector: false
+  qdrant_collection: "wessley_docs"
+  topk_dense: 50
+  topk_sparse: 50
+  topk_final: 20
+
+learning:
+  enable_cron: true
+  weekly_eval_cron: "0 3 * * 1"
+  detector_finetune_quota_hours: 2
+  shadow_eval_sample: 0.2
+
+## 9) Example: Re-ranker Input (for transparency)
+[QUERY]  "where is the starter relay"
+[DOC1]   "Starter relay (K1) located at engine bay fuse/relay box, slot R3..."
+[DOC2]   "Wiring: IG1 feeds coil of starter relay via clutch switch..."
+[DOC3]   "Fuse F10 (30A) protects starter motor circuit..."
+
+
+Cross-encoder scores these; top-k returned with component/net anchors.
+
+## 10) Roadmap (90 days)
+
+Week 0–2: Implement semantic module + hybrid search; add telemetry & basic eval.
+
+Week 3–5: Introduce token tagger + weak labels; grow ontology tables; first shadow promotions.
+
+Week 6–8: Detector fine-tune on mined errors; add junction vs crossing robustness; E2E F1 ≥ 0.80 clean, ≥ 0.70 noisy.
+
+Week 9–12: Curriculum on multi-brand manuals; location hints; start failure-mode queries (“no crank: check K1, F10, G102”).

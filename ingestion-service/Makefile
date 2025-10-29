@@ -1,26 +1,40 @@
-.PHONY: setup lint test run bench clean help install dev-install
+# Wessley.ai Ingestion Service - Development Makefile
+.PHONY: help setup start stop restart logs health test lint format typecheck clean reset
 
 # Default target
-help:
-	@echo "Available targets:"
-	@echo "  setup       - Install dependencies and set up development environment"
-	@echo "  dev-install - Install package in development mode"
-	@echo "  lint        - Run code linting with ruff and mypy"
-	@echo "  test        - Run test suite with pytest"
-	@echo "  run         - Start the service with docker compose"
-	@echo "  bench       - Run benchmark suite"
-	@echo "  clean       - Clean up generated files and containers"
+.DEFAULT_GOAL := help
 
-setup: dev-install
-	@echo "Setting up development environment..."
-	cp .env.example .env
-	docker compose pull
-	@echo "Setup complete. Edit .env file with your configuration."
+# Colors for output
+BLUE := \033[36m
+GREEN := \033[32m
+YELLOW := \033[33m
+RED := \033[31m
+NC := \033[0m
 
-dev-install:
-	@echo "Installing dependencies..."
-	pip install -e ".[dev]"
-	pre-commit install
+help: ## Show this help message
+	@echo "$(BLUE)Wessley.ai Ingestion Service - Development Commands$(NC)"
+	@echo "=================================================="
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "$(YELLOW)Examples:$(NC)"
+	@echo "  make setup     # Complete system setup"
+	@echo "  make start     # Start all services"
+	@echo "  make test      # Run all tests"
+	@echo "  make health    # Check service health"
+
+setup: ## Install dependencies and setup system
+	@echo "$(BLUE)Setting up system...$(NC)"
+	@chmod +x scripts/*.sh
+	@./scripts/setup-system.sh
+
+start: ## Start local infrastructure and application
+	@echo "$(BLUE)Starting services...$(NC)"
+	@./scripts/start-local.sh
+
+start-app: ## Start only the application (assumes infrastructure is running)
+	@echo "$(BLUE)Starting application...$(NC)"
+	@./scripts/run-dev.sh
 
 lint:
 	@echo "Running linters..."

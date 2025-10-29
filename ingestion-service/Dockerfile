@@ -13,8 +13,9 @@ RUN pip install uv
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files
+# Copy dependency files and source code
 COPY pyproject.toml ./
+COPY src/ ./src/
 
 # Install dependencies
 RUN uv pip install --system -e .
@@ -26,13 +27,14 @@ FROM python:3.11-slim as production
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-eng \
-    libgl1-mesa-glx \
+    libgl1-mesa-dev \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
     libgomp1 \
     poppler-utils \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

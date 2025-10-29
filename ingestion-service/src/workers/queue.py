@@ -4,6 +4,7 @@ Redis queue implementation for job processing.
 import json
 import os
 import uuid
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -11,6 +12,9 @@ import redis.asyncio as redis
 from redis.asyncio import Redis
 
 from ..core.schemas import CreateIngestionRequest, IngestionStatus, RealtimeUpdate
+from ..core.logging import StructuredLogger
+
+logger = StructuredLogger(__name__)
 
 
 class QueueManager:
@@ -26,6 +30,15 @@ class QueueManager:
         
     async def connect(self) -> None:
         """Establish Redis connection."""
+        connection_start = time.time()
+        
+        logger.info("🔌 Establishing Redis connection",
+                   redis_url=self.redis_url,
+                   redis_queue_name=self.queue_name,
+                   connection_timeout=5,
+                   keepalive_enabled=True,
+                   health_check_interval=30)
+        
         try:
             self.redis_client = redis.from_url(
                 self.redis_url,
@@ -35,11 +48,28 @@ class QueueManager:
                 socket_keepalive=True,
                 health_check_interval=30,
             )
-            # Test connection
-            await self.redis_client.ping()
-            print(f"Connected to Redis at {self.redis_url}")
+            
+            # Test connection with ping
+            logger.debug("🏓 Testing Redis connection with ping")
+            ping_start = time.time()
+            ping_result = await self.redis_client.ping()
+            ping_duration = time.time() - ping_start
+            
+            connection_duration = time.time() - connection_start
+            
+            logger.info("✅ Redis connection established successfully",
+                       redis_url=self.redis_url,
+                       connection_duration_ms=round(connection_duration * 1000, 2),
+                       ping_result=ping_result,
+                       ping_duration_ms=round(ping_duration * 1000, 2))
+            
         except Exception as e:
-            print(f"Failed to connect to Redis: {e}")
+            connection_duration = time.time() - connection_start
+            logger.exception("❌ Failed to connect to Redis",
+                           redis_url=self.redis_url,
+                           connection_duration_ms=round(connection_duration * 1000, 2),
+                           error_type=type(e).__name__,
+                           error_message=str(e))
             raise
     
     async def disconnect(self) -> None:
@@ -68,7 +98,7 @@ class QueueManager:
         job_data = {
             "job_id": str(job_id),
             "user_id": user_id,
-            "request": request.model_dump(),
+            "request": request.model_dump(mode='json'),
             "status": IngestionStatus.QUEUED.value,
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat(),
