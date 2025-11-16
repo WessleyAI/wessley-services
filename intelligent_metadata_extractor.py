@@ -471,17 +471,25 @@ For lookup_table (wire colors, abbreviations, symbols):
 {{
     "entries": [
         {{"code": "R", "meaning": "Red", "usage": "Power/Positive"}},
-        {{"code": "ALT", "meaning": "Alternator", "type": "component"}}
+        {{"code": "ALT", "meaning": "Alternator", "type": "component"}},
+        ... (extract EVERY entry - do not limit)
     ]
 }}
+
+CRITICAL: Extract ALL entries from lookup tables. If there are 100+ codes, extract all 100+.
+Do NOT summarize or skip any entries.
 
 For table_of_contents:
 {{
     "sections": [
         {{"title": "Starter Circuit", "start_page": 16, "category": "electrical"}},
-        {{"title": "Lighting System", "start_page": 46, "category": "lighting"}}
+        {{"title": "Lighting System", "start_page": 46, "category": "lighting"}},
+        ... (extract EVERY entry you can find - do not limit or summarize)
     ]
 }}
+
+CRITICAL: For table_of_contents pages, extract EVERY SINGLE line item you can find.
+Do NOT summarize or skip entries. If there are 50+ items, extract all 50+.
 
 For instructions:
 {{
@@ -508,11 +516,14 @@ For diagram_legend:
     "conventions": ["convention descriptions"]
 }}
 
-IMPORTANT:
-- Extract EVERYTHING you can find
-- Be thorough - this is reference data
+CRITICAL RULES:
+- Extract EVERY SINGLE item you can find - do not limit to 2-5 examples
+- If there are 50+ entries in a table of contents, extract all 50+
+- If there are 100+ codes in a lookup table, extract all 100+
+- DO NOT summarize or provide "representative samples"
+- Be exhaustive and complete - this is reference data
 - Maintain exact codes/values from the text
-- Include context where helpful
+- Include ALL context available
 
 Respond ONLY with valid JSON, no other text."""
 
