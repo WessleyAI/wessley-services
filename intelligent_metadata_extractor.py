@@ -396,6 +396,26 @@ Respond ONLY with valid JSON, no other text."""
                     count = len(extracted_data.get('steps', []))
 
             logger.info(f"   Extracted {count} items from page {page_num}")
+
+            # Log the actual extracted data for visibility
+            if count > 0:
+                logger.info(f"   📦 Structured Data Preview:")
+                if 'entries' in extracted_data:
+                    for i, entry in enumerate(extracted_data['entries'][:3], 1):
+                        logger.info(f"      {i}. {entry}")
+                    if len(extracted_data['entries']) > 3:
+                        logger.info(f"      ... and {len(extracted_data['entries']) - 3} more")
+                elif 'sections' in extracted_data:
+                    for i, section in enumerate(extracted_data['sections'][:3], 1):
+                        logger.info(f"      {i}. {section}")
+                    if len(extracted_data['sections']) > 3:
+                        logger.info(f"      ... and {len(extracted_data['sections']) - 3} more")
+                elif 'specs' in extracted_data:
+                    for i, spec in enumerate(extracted_data['specs'][:3], 1):
+                        logger.info(f"      {i}. {spec}")
+                    if len(extracted_data['specs']) > 3:
+                        logger.info(f"      ... and {len(extracted_data['specs']) - 3} more")
+
             return extracted_data
 
         except Exception as e:
@@ -480,6 +500,16 @@ Respond ONLY with valid JSON, no other text."""
                 chunks = []
 
             logger.info(f"   Created {len(chunks)} semantic chunks from page {page_num}")
+
+            # Log the actual semantic chunks for visibility
+            if chunks:
+                logger.info(f"   💬 Semantic Chunks Preview:")
+                for i, chunk in enumerate(chunks[:3], 1):
+                    preview = chunk[:100] + "..." if len(chunk) > 100 else chunk
+                    logger.info(f"      {i}. {preview}")
+                if len(chunks) > 3:
+                    logger.info(f"      ... and {len(chunks) - 3} more chunks")
+
             return chunks
 
         except Exception as e:
