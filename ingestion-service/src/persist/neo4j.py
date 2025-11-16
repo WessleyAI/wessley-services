@@ -53,21 +53,26 @@ class GraphWriteResult:
 class Neo4jPersistence:
     """
     Handles persistence of schematic data to Neo4j graph database.
-    
+
     Graph Schema:
     - (:Vehicle {make, model, year, project_id})
-    - (:Component {id, type, value, page, confidence})
+    - (:Component {id, type, value, page, confidence, bbox_x1, bbox_y1, bbox_x2, bbox_y2,
+                   suggested_spatial, spatial_confidence, spatial_zone, spatial_reasoning,
+                   spatial_method, spatial_generated_at})
     - (:Pin {name, position})
     - (:Net {name, voltage_level, is_bus, bus_width})
     - (:TextSpan {text, page, confidence, engine})
     - (:Junction {type, position, confidence})
-    
+
     Relationships:
     - (Vehicle)-[:CONTAINS]->(Component)
     - (Component)-[:HAS_PIN]->(Pin)
     - (Pin)-[:ON_NET]->(Net)
     - (Component)-[:EXTRACTED_FROM]->(TextSpan)
     - (Net)-[:LABELED_BY]->(TextSpan)
+
+    Note: suggested_spatial and related fields are initially null and populated
+    by the LLM spatial placement service after ingestion.
     """
     
     def __init__(
@@ -291,7 +296,14 @@ class Neo4jPersistence:
                 'bbox_x2': component.bbox[2] if component.bbox else 0,
                 'bbox_y2': component.bbox[3] if component.bbox else 0,
                 'confidence': component.confidence,
-                'created_at': datetime.now().isoformat()
+                'created_at': datetime.now().isoformat(),
+                # Spatial placement fields (to be populated by LLM spatial placer)
+                'suggested_spatial': None,  # Will be {x, y, z} dict
+                'spatial_confidence': None,
+                'spatial_zone': None,
+                'spatial_reasoning': None,
+                'spatial_method': None,
+                'spatial_generated_at': None
             }
             component_data.append(comp_props)
             
