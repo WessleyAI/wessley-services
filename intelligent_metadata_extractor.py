@@ -375,14 +375,25 @@ Respond ONLY with valid JSON, no other text."""
 
             extracted_data = json.loads(json_match)
 
+            # Handle both dict and list responses from LLM
+            if isinstance(extracted_data, list):
+                # LLM returned array directly - wrap it in expected structure
+                logger.warning(f"   ⚠️  LLM returned list instead of object, wrapping as 'entries'")
+                extracted_data = {"entries": extracted_data}
+
             # Count extracted items
             count = 0
-            if 'entries' in extracted_data:
-                count = len(extracted_data['entries'])
-            elif 'sections' in extracted_data:
-                count = len(extracted_data['sections'])
-            elif 'specs' in extracted_data:
-                count = len(extracted_data['specs'])
+            if isinstance(extracted_data, dict):
+                if 'entries' in extracted_data:
+                    count = len(extracted_data['entries'])
+                elif 'sections' in extracted_data:
+                    count = len(extracted_data['sections'])
+                elif 'specs' in extracted_data:
+                    count = len(extracted_data['specs'])
+                elif 'symbols' in extracted_data:
+                    count = len(extracted_data['symbols'])
+                elif 'steps' in extracted_data:
+                    count = len(extracted_data.get('steps', []))
 
             logger.info(f"   Extracted {count} items from page {page_num}")
             return extracted_data
@@ -458,7 +469,15 @@ Respond ONLY with valid JSON, no other text."""
                 json_match = json_match.split('```')[1].split('```')[0]
 
             result = json.loads(json_match)
-            chunks = result.get('chunks', [])
+
+            # Handle both dict and list responses from LLM
+            if isinstance(result, dict):
+                chunks = result.get('chunks', [])
+            elif isinstance(result, list):
+                # LLM returned array directly
+                chunks = result
+            else:
+                chunks = []
 
             logger.info(f"   Created {len(chunks)} semantic chunks from page {page_num}")
             return chunks
