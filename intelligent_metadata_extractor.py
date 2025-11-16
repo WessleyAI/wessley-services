@@ -155,7 +155,10 @@ class ContentAnalyzer:
             "symbol_maps": [],      # Symbol definitions from diagram legends
             "abbreviations": [],    # Abbreviation definitions
             "wire_colors": [],      # Wire color codes
-            "component_codes": []   # Component abbreviations/codes
+            "component_codes": [],  # Component abbreviations/codes
+            "instructions": [],     # How to read diagrams, procedures
+            "rules": [],            # Technical rules and requirements
+            "conventions": []       # Diagram conventions and standards
         }
         logger.info(f"🤖 Content Analyzer initialized with model: {model}")
 
@@ -181,6 +184,33 @@ class ContentAnalyzer:
         if 'symbols' in extracted_data:
             self.accumulated_context['symbol_maps'].extend(extracted_data['symbols'])
             added_count += len(extracted_data['symbols'])
+
+        # Capture instructions for reading diagrams
+        if 'steps' in extracted_data and extracted_data['steps']:
+            self.accumulated_context['instructions'].extend(extracted_data['steps'])
+            added_count += len(extracted_data['steps'])
+
+        if 'title' in extracted_data and 'diagram' in str(extracted_data.get('title', '')).lower():
+            # This is diagram-related instruction, save the whole instruction block
+            instruction_text = f"{extracted_data.get('title', '')}"
+            if instruction_text and instruction_text not in self.accumulated_context['instructions']:
+                self.accumulated_context['instructions'].append(instruction_text)
+                added_count += 1
+
+        # Capture technical rules
+        if 'rules' in extracted_data and extracted_data['rules']:
+            self.accumulated_context['rules'].extend(extracted_data['rules'])
+            added_count += len(extracted_data['rules'])
+
+        # Capture conventions
+        if 'conventions' in extracted_data and extracted_data['conventions']:
+            for conv in extracted_data['conventions']:
+                if isinstance(conv, dict) and 'description' in conv:
+                    self.accumulated_context['conventions'].append(conv['description'])
+                    added_count += 1
+                elif isinstance(conv, str):
+                    self.accumulated_context['conventions'].append(conv)
+                    added_count += 1
 
         if added_count > 0:
             total_context = sum(len(v) for v in self.accumulated_context.values())
@@ -214,6 +244,21 @@ class ContentAnalyzer:
             summary += "\nComponent Codes:\n"
             for comp in self.accumulated_context['component_codes'][:20]:
                 summary += f"  - {comp.get('code', '?')}: {comp.get('meaning', '?')}\n"
+
+        if self.accumulated_context['instructions']:
+            summary += "\nHow to Read Diagrams / Instructions:\n"
+            for inst in self.accumulated_context['instructions'][:10]:
+                summary += f"  - {inst}\n"
+
+        if self.accumulated_context['rules']:
+            summary += "\nTechnical Rules:\n"
+            for rule in self.accumulated_context['rules'][:10]:
+                summary += f"  - {rule}\n"
+
+        if self.accumulated_context['conventions']:
+            summary += "\nDiagram Conventions:\n"
+            for conv in self.accumulated_context['conventions'][:10]:
+                summary += f"  - {conv}\n"
 
         summary += "</document_context>\n"
         return summary
