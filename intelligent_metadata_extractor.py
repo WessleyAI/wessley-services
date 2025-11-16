@@ -22,6 +22,7 @@ import os
 import json
 import logging
 import argparse
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -37,6 +38,44 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# JSON Repair Utilities
+# ============================================================================
+
+def repair_json(json_str: str) -> str:
+    """
+    Attempt to repair common JSON formatting issues from LLM output
+
+    - Fix missing closing braces/brackets
+    - Remove trailing commas
+    - Fix invalid escape sequences
+    - Handle unicode issues
+    - Fix nested quotes in strings
+    """
+    # Remove invalid unicode escape sequences (like \u211 or \u21)
+    json_str = re.sub(r'\\u[0-9a-fA-F]{0,3}(?![0-9a-fA-F])', '', json_str)
+
+    # Fix nested JSON in strings like "symbol": "{"a"}"  → "symbol": "{a}"
+    json_str = re.sub(r'"\{\\?"([^"]*?)\\?"\}"', r'"{\\1}"', json_str)
+
+    # Count braces and brackets
+    open_braces = json_str.count('{')
+    close_braces = json_str.count('}')
+    open_brackets = json_str.count('[')
+    close_brackets = json_str.count(']')
+
+    # Add missing closing characters at the end
+    if open_braces > close_braces:
+        json_str += '}' * (open_braces - close_braces)
+    if open_brackets > close_brackets:
+        json_str += ']' * (open_brackets - close_brackets)
+
+    # Remove trailing commas before closing braces/brackets
+    json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+
+    return json_str
+
 
 # ============================================================================
 # LLM-Based Content Analyzer
@@ -112,7 +151,72 @@ class ContentAnalyzer:
     def __init__(self, model: str = "llama3.1", failure_logger: Optional[FailureLogger] = None):
         self.model = model
         self.failure_logger = failure_logger or FailureLogger()
+        self.accumulated_context = {
+            "symbol_maps": [],      # Symbol definitions from diagram legends
+            "abbreviations": [],    # Abbreviation definitions
+            "wire_colors": [],      # Wire color codes
+            "component_codes": []   # Component abbreviations/codes
+        }
         logger.info(f"🤖 Content Analyzer initialized with model: {model}")
+
+    def add_to_context(self, extracted_data: Dict[str, Any], page_type: str):
+        """
+        Add extracted lookup tables to accumulated context for future pages
+        """
+        added_count = 0
+
+        if 'entries' in extracted_data:
+            for entry in extracted_data['entries']:
+                # Classify the type of entry
+                if 'color' in str(entry).lower() or entry.get('type') == 'wire_color':
+                    self.accumulated_context['wire_colors'].append(entry)
+                    added_count += 1
+                elif entry.get('type') == 'component' or 'component' in str(entry).lower():
+                    self.accumulated_context['component_codes'].append(entry)
+                    added_count += 1
+                elif 'code' in entry or 'abbreviation' in entry or entry.get('type') == 'abbreviation':
+                    self.accumulated_context['abbreviations'].append(entry)
+                    added_count += 1
+
+        if 'symbols' in extracted_data:
+            self.accumulated_context['symbol_maps'].extend(extracted_data['symbols'])
+            added_count += len(extracted_data['symbols'])
+
+        if added_count > 0:
+            total_context = sum(len(v) for v in self.accumulated_context.values())
+            logger.info(f"   ✓ Added {added_count} items to context (total: {total_context})")
+
+    def get_context_summary(self) -> str:
+        """
+        Generate a summary of accumulated context for inclusion in prompts
+        """
+        if not any(self.accumulated_context.values()):
+            return ""
+
+        summary = "\n<document_context>\nPreviously extracted reference data:\n\n"
+
+        if self.accumulated_context['symbol_maps']:
+            summary += "Symbol Definitions:\n"
+            for sym in self.accumulated_context['symbol_maps'][:20]:  # Limit to 20
+                summary += f"  - {sym.get('symbol', '?')}: {sym.get('meaning', '?')}\n"
+
+        if self.accumulated_context['abbreviations']:
+            summary += "\nAbbreviations:\n"
+            for abbr in self.accumulated_context['abbreviations'][:20]:
+                summary += f"  - {abbr.get('code', '?')}: {abbr.get('meaning', '?')}\n"
+
+        if self.accumulated_context['wire_colors']:
+            summary += "\nWire Colors:\n"
+            for color in self.accumulated_context['wire_colors'][:10]:
+                summary += f"  - {color.get('code', '?')}: {color.get('meaning', '?')}\n"
+
+        if self.accumulated_context['component_codes']:
+            summary += "\nComponent Codes:\n"
+            for comp in self.accumulated_context['component_codes'][:20]:
+                summary += f"  - {comp.get('code', '?')}: {comp.get('meaning', '?')}\n"
+
+        summary += "</document_context>\n"
+        return summary
 
     def analyze_failure(self, text: str, page_num: int, stage: str, error: str, raw_response: str) -> Dict[str, Any]:
         """
@@ -202,8 +306,10 @@ Respond ONLY with valid JSON."""
                 "reasoning": "explanation"
             }
         """
-        prompt = f"""You are analyzing page {page_num} of a technical manual.
+        context_summary = self.get_context_summary()
 
+        prompt = f"""You are analyzing page {page_num} of a technical manual.
+{context_summary}
 <page_text>
 {text[:2000]}
 </page_text>
@@ -248,6 +354,9 @@ Respond ONLY with valid JSON, no other text."""
                 json_match = json_match.split('```json')[1].split('```')[0]
             elif json_match.startswith('```'):
                 json_match = json_match.split('```')[1].split('```')[0]
+
+            # Repair JSON before parsing
+            json_match = repair_json(json_match)
 
             result = json.loads(json_match)
             logger.debug(f"Page {page_num} classified as: {result['page_type']} (Tier {result['storage_tier']})")
@@ -297,17 +406,21 @@ Respond ONLY with valid JSON, no other text."""
             - instructions: {"steps": [...], "warnings": [...]}
             - specifications: {"specs": [{"parameter": "voltage", "value": "12V"}, ...]}
         """
+        context_summary = self.get_context_summary()
+
         prompt = f"""You are extracting structured data from page {page_num} of a technical manual.
 
 Page Type: {page_type}
-
+{context_summary}
 <page_text>
 {text[:3000]}
 </page_text>
 
-Extract ALL useful structured information from this page.
+IMPORTANT: Extract ONLY the format that matches the page type "{page_type}".
+DO NOT return multiple formats. Return ONLY ONE structure that matches this page type.
+Use the document context above to interpret symbols, abbreviations, and codes in the text.
 
-Respond with JSON in the appropriate format for this page type:
+Respond with JSON in the appropriate format for THIS SPECIFIC page type:
 
 For lookup_table (wire colors, abbreviations, symbols):
 {{
@@ -373,6 +486,9 @@ Respond ONLY with valid JSON, no other text."""
             elif json_match.startswith('```'):
                 json_match = json_match.split('```')[1].split('```')[0]
 
+            # Repair JSON before parsing
+            json_match = repair_json(json_match)
+
             extracted_data = json.loads(json_match)
 
             # Handle both dict and list responses from LLM
@@ -380,6 +496,25 @@ Respond ONLY with valid JSON, no other text."""
                 # LLM returned array directly - wrap it in expected structure
                 logger.warning(f"   ⚠️  LLM returned list instead of object, wrapping as 'entries'")
                 extracted_data = {"entries": extracted_data}
+
+            # Handle nested structures - extract the correct nested object
+            # Sometimes LLM returns {"lookup_table": {"entries": [...]}} instead of {"entries": [...]}
+            if isinstance(extracted_data, dict):
+                # Check if there's a nested structure matching page_type
+                page_type_key = page_type.split(' | ')[0]  # Handle multi-type like "instructions | lookup_table"
+
+                if page_type_key in extracted_data:
+                    logger.info(f"   🔧 Extracting nested '{page_type_key}' structure")
+                    extracted_data = extracted_data[page_type_key]
+                elif 'lookup_table' in extracted_data and 'entries' not in extracted_data:
+                    logger.info(f"   🔧 Extracting nested 'lookup_table' structure")
+                    extracted_data = extracted_data['lookup_table']
+                elif 'table_of_contents' in extracted_data and 'sections' not in extracted_data:
+                    logger.info(f"   🔧 Extracting nested 'table_of_contents' structure")
+                    extracted_data = extracted_data['table_of_contents']
+                elif 'specifications' in extracted_data and 'specs' not in extracted_data:
+                    logger.info(f"   🔧 Extracting nested 'specifications' structure")
+                    extracted_data = extracted_data['specifications']
 
             # Count extracted items
             count = 0
@@ -487,6 +622,9 @@ Respond ONLY with valid JSON, no other text."""
                 json_match = json_match.split('```json')[1].split('```')[0]
             elif json_match.startswith('```'):
                 json_match = json_match.split('```')[1].split('```')[0]
+
+            # Repair JSON before parsing
+            json_match = repair_json(json_match)
 
             result = json.loads(json_match)
 

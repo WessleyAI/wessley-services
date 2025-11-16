@@ -132,8 +132,12 @@ def process_existing_ocr(ocr_dir: str,
             semantic_chunks = analyzer.extract_semantic_knowledge(text, page_num)
             logger.info(f"   ✓ Created {len(semantic_chunks)} semantic chunks")
 
-            # Step 5: Route to storage
-            logger.info("   5️⃣  Routing to storage tiers...")
+            # Step 5: Add to accumulated context for future pages
+            logger.info("   5️⃣  Adding to context for future pages...")
+            analyzer.add_to_context(structured_data, page_analysis['page_type'])
+
+            # Step 6: Route to storage
+            logger.info("   6️⃣  Routing to storage tiers...")
             router.route(page_analysis, structured_data, semantic_chunks, page_num)
 
             # Page timing
