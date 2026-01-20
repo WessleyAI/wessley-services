@@ -159,19 +159,46 @@ def create_app() -> FastAPI:
                                exception_message=str(e))
                 raise
     
+    # Get environment-specific CORS configuration
+    is_production = os.getenv("APP_ENV") == "prod"
+
+    # Allowed hosts - restrict in production
+    allowed_hosts = os.getenv("ALLOWED_HOSTS", "").split(",") if is_production else ["*"]
+    if not allowed_hosts or allowed_hosts == [""]:
+        allowed_hosts = ["*.wessley.ai", "wessley.ai", "localhost"] if is_production else ["*"]
+
+    # CORS origins - restrict in production
+    cors_origins_env = os.getenv("CORS_ORIGINS", "")
+    if cors_origins_env:
+        cors_origins = cors_origins_env.split(",")
+    elif is_production:
+        cors_origins = [
+            "https://wessley.ai",
+            "https://www.wessley.ai",
+            "https://app.wessley.ai",
+            "https://staging.wessley.ai",
+        ]
+    else:
+        cors_origins = ["*"]
+
+    logger.info("🔒 Configuring security middleware",
+               is_production=is_production,
+               allowed_hosts=allowed_hosts,
+               cors_origins=cors_origins)
+
     # Security middleware
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["*"],  # TODO: Configure allowed hosts for production
+        allowed_hosts=allowed_hosts,
     )
-    
+
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # TODO: Configure CORS origins for production
+        allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"] if is_production else ["*"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"] if is_production else ["*"],
     )
     
     # Include routers
