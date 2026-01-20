@@ -1,0 +1,54 @@
+[project]
+name = "knowledge-scraper"
+version = "0.1.0"
+description = "Automotive knowledge acquisition from forums, YouTube, and parts catalogs"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.0.0",
+    "redis>=5.0.0",
+    "neo4j>=5.13.0",
+    "qdrant-client>=1.6.0",
+    "httpx>=0.25.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+    "praw>=7.7.0",
+    "youtube-transcript-api>=0.6.0",
+    "aiohttp>=3.9.0",
+    "structlog>=23.0.0",
+    "python-dotenv>=1.0.0",
+    "openai>=1.0.0",
+    "tiktoken>=0.5.0",
+    "tenacity>=8.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
