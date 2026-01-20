@@ -378,30 +378,337 @@ class StorageStage:
 
 
 class SpatialPlacementStage:
-    """Stage 4: LLM spatial placement"""
+    """Stage 4: Spatial placement using learning-service genetic algorithm optimization"""
+
+    # Default engine bay workspace bounds (mm)
+    DEFAULT_WORKSPACE_BOUNDS = [1400, 900, 1200]  # width, depth, height
+
+    # Default component physical properties
+    DEFAULT_COMPONENT_PROPERTIES = {
+        "battery": {"dimensions": [240, 180, 220], "weight": 15.0, "heat_generation": 5.0, "accessibility": 0.9},
+        "alternator": {"dimensions": [180, 150, 150], "weight": 6.0, "heat_generation": 30.0, "accessibility": 0.7},
+        "starter": {"dimensions": [200, 120, 120], "weight": 4.5, "heat_generation": 10.0, "accessibility": 0.6},
+        "relay": {"dimensions": [30, 25, 25], "weight": 0.05, "heat_generation": 1.0, "accessibility": 0.5},
+        "fuse": {"dimensions": [20, 10, 15], "weight": 0.01, "heat_generation": 0.5, "accessibility": 0.8},
+        "fuse_box": {"dimensions": [200, 150, 80], "weight": 0.8, "heat_generation": 2.0, "accessibility": 0.95},
+        "relay_box": {"dimensions": [150, 120, 60], "weight": 0.5, "heat_generation": 3.0, "accessibility": 0.9},
+        "ecu": {"dimensions": [180, 150, 40], "weight": 0.4, "heat_generation": 8.0, "accessibility": 0.7},
+        "sensor": {"dimensions": [40, 30, 30], "weight": 0.05, "heat_generation": 0.5, "accessibility": 0.5},
+        "ground": {"dimensions": [10, 10, 5], "weight": 0.01, "heat_generation": 0.0, "accessibility": 0.3},
+        "connector": {"dimensions": [40, 30, 20], "weight": 0.02, "heat_generation": 0.1, "accessibility": 0.6},
+        "light": {"dimensions": [150, 100, 100], "weight": 0.3, "heat_generation": 15.0, "accessibility": 0.5},
+        "switch": {"dimensions": [25, 25, 30], "weight": 0.02, "heat_generation": 0.2, "accessibility": 0.9},
+        "default": {"dimensions": [50, 50, 50], "weight": 0.1, "heat_generation": 0.5, "accessibility": 0.5},
+    }
 
     def __init__(self, config: PipelineConfig, logger: PipelineLogger):
         self.config = config
         self.logger = logger
+        self.learning_service_url = os.getenv("LEARNING_SERVICE_URL", "http://localhost:8000")
+        self.neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        self.neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        self.neo4j_password = os.getenv("NEO4J_PASSWORD", "password123")
 
     def run(self, storage_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Run LLM spatial placement on components"""
+        """Run spatial placement optimization on components using learning-service"""
+        import requests
+        import time
+
         self.logger.log_stage("spatial", "=" * 70)
-        self.logger.log_stage("spatial", "📍 Stage 4: Spatial Placement")
+        self.logger.log_stage("spatial", "📍 Stage 4: Spatial Placement (Genetic Algorithm)")
         self.logger.log_stage("spatial", "=" * 70)
 
         if self.config.skip_spatial:
             self.logger.log_stage("spatial", "⏭️  Skipping spatial placement")
             return {"status": "skipped"}
 
-        # Import spatial placer
-        # from ollama_spatial_placer import run_spatial_placement
+        try:
+            # Load components from Neo4j
+            self.logger.log_stage("spatial", "Loading components from Neo4j...")
+            components_data = self._load_components_from_neo4j()
 
-        self.logger.log_stage("spatial", "TODO: Implement spatial placement stage")
+            if not components_data:
+                self.logger.log_stage("spatial", "⚠️  No components to place (none found without spatial coordinates)")
+                return {"status": "skipped", "message": "No components found needing spatial placement"}
+
+            self.logger.log_stage("spatial", f"   Found {len(components_data)} components to place")
+
+            # Convert to learning-service format
+            self.logger.log_stage("spatial", "Preparing optimization request...")
+            optimization_request = self._prepare_optimization_request(components_data)
+
+            # Submit to learning-service
+            self.logger.log_stage("spatial", f"Submitting to learning-service at {self.learning_service_url}...")
+            start_time = time.time()
+
+            try:
+                response = requests.post(
+                    f"{self.learning_service_url}/api/v1/optimization/placement",
+                    json=optimization_request,
+                    timeout=30
+                )
+
+                if response.status_code != 200:
+                    raise Exception(f"Failed to submit optimization: {response.status_code} - {response.text}")
+
+                request_data = response.json()
+                request_id = request_data["request_id"]
+                self.logger.log_stage("spatial", f"   Optimization request ID: {request_id}")
+
+            except requests.ConnectionError:
+                self.logger.log_stage("spatial", "⚠️  Cannot connect to learning-service, falling back to local placement...")
+                return self._run_local_placement(components_data)
+
+            # Poll for completion
+            self.logger.log_stage("spatial", "Waiting for optimization to complete...")
+            max_wait = 600  # 10 minutes
+            poll_interval = 10  # seconds
+
+            while time.time() - start_time < max_wait:
+                try:
+                    status_resp = requests.get(
+                        f"{self.learning_service_url}/api/v1/optimization/placement/{request_id}/status",
+                        timeout=10
+                    )
+                    status_data = status_resp.json()
+
+                    if status_data.get("result_available", False):
+                        self.logger.log_stage("spatial", "   ✓ Optimization complete!")
+                        break
+
+                    progress = status_data.get("progress", 0)
+                    self.logger.log_stage("spatial", f"   Progress: {progress*100:.1f}%")
+                    time.sleep(poll_interval)
+
+                except requests.RequestException as e:
+                    self.logger.log_stage("spatial", f"   Status check failed: {e}")
+                    time.sleep(poll_interval)
+            else:
+                raise Exception(f"Optimization timed out after {max_wait} seconds")
+
+            # Get results
+            result_resp = requests.get(
+                f"{self.learning_service_url}/api/v1/optimization/placement/{request_id}/result",
+                timeout=30
+            )
+
+            if result_resp.status_code != 200:
+                raise Exception(f"Failed to retrieve results: {result_resp.status_code} - {result_resp.text}")
+
+            result = result_resp.json()
+
+            # Update Neo4j with spatial coordinates
+            self.logger.log_stage("spatial", f"Updating Neo4j with {len(result.get('positions', {}))} placements...")
+            update_count = self._update_components_spatial(result)
+
+            duration = time.time() - start_time
+
+            # Log summary
+            self.logger.log_stage("spatial", f"✅ Spatial placement complete")
+            self.logger.log_stage("spatial", f"   Components placed: {update_count}")
+            self.logger.log_stage("spatial", f"   Fitness score: {result.get('fitness_score', 0):.3f}")
+            self.logger.log_stage("spatial", f"   Violations: {len(result.get('violations', []))}")
+            self.logger.log_stage("spatial", f"   Algorithm: {result.get('algorithm_used', 'genetic_algorithm')}")
+            self.logger.log_stage("spatial", f"   Duration: {duration:.1f}s")
+
+            return {
+                "status": "completed",
+                "placement_solution": {
+                    "positions": result.get("positions", {}),
+                    "orientations": result.get("orientations", {}),
+                    "fitness": result.get("fitness_score", 0),
+                    "violations": result.get("violations", [])
+                },
+                "algorithm_used": result.get("algorithm_used", "genetic_algorithm"),
+                "computation_time_ms": result.get("computation_time_ms", 0),
+                "components_placed": update_count,
+                "duration": duration
+            }
+
+        except requests.ConnectionError:
+            self.logger.log_stage("spatial", "❌ Cannot connect to learning-service")
+            self.logger.log_stage("spatial", f"   Ensure learning-service is running at {self.learning_service_url}")
+            return {"status": "failed", "error": "learning-service unavailable"}
+        except Exception as e:
+            self.logger.log_stage("spatial", f"❌ Spatial placement failed: {e}")
+            return {"status": "failed", "error": str(e)}
+
+    def _load_components_from_neo4j(self) -> List[Dict[str, Any]]:
+        """Load components from Neo4j that need spatial placement"""
+        from neo4j import GraphDatabase
+
+        driver = GraphDatabase.driver(
+            self.neo4j_uri,
+            auth=(self.neo4j_user, self.neo4j_password)
+        )
+
+        try:
+            with driver.session() as session:
+                result = session.run("""
+                    MATCH (c:Component)
+                    WHERE c.spatial_x IS NULL
+                    OPTIONAL MATCH (c)-[:CONNECTED_VIA|CONNECTED_TO]-(other:Component)
+                    WHERE other.id <> c.id
+                    RETURN c.id as id,
+                           c.type as type,
+                           c.name as name,
+                           c.page as page,
+                           c.description as description,
+                           collect(DISTINCT other.id) as connections
+                    ORDER BY c.page, c.id
+                """)
+
+                components = []
+                for record in result:
+                    comp = dict(record)
+                    # Filter out None connections
+                    comp["connections"] = [c for c in comp.get("connections", []) if c is not None]
+                    components.append(comp)
+
+                return components
+        finally:
+            driver.close()
+
+    def _prepare_optimization_request(self, components_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Convert Neo4j components to learning-service optimization request format"""
+        components = []
+
+        for comp in components_data:
+            comp_type = (comp.get("type") or "default").lower()
+            props = self.DEFAULT_COMPONENT_PROPERTIES.get(
+                comp_type,
+                self.DEFAULT_COMPONENT_PROPERTIES["default"]
+            )
+
+            component = {
+                "id": comp["id"],
+                "type": comp_type,
+                "dimensions": props["dimensions"],
+                "weight": props["weight"],
+                "heat_generation": props["heat_generation"],
+                "accessibility_requirement": props["accessibility"],
+                "vibration_sensitivity": 0.5,
+                "electromagnetic_interference": 0.1 if comp_type not in ["ecu", "sensor"] else 0.3,
+                "connections": comp.get("connections", []),
+                "electrical_properties": {},
+                "mechanical_properties": {},
+                "cost": 100.0
+            }
+            components.append(component)
 
         return {
-            "status": "pending",
-            "message": "Spatial placement not yet implemented in pipeline"
+            "components": components,
+            "workspace_bounds": self.DEFAULT_WORKSPACE_BOUNDS,
+            "constraints": [],
+            "objectives": {
+                "wire_length": 0.3,
+                "accessibility": 0.2,
+                "heat_management": 0.2,
+                "vibration": 0.1,
+                "emi": 0.2
+            },
+            "use_rl_agent": True,
+            "optimization_time_limit_seconds": 300
+        }
+
+    def _update_components_spatial(self, result: Dict[str, Any]) -> int:
+        """Update Neo4j components with spatial coordinates from optimization result"""
+        from neo4j import GraphDatabase
+
+        positions = result.get("positions", {})
+        orientations = result.get("orientations", {})
+
+        if not positions:
+            return 0
+
+        driver = GraphDatabase.driver(
+            self.neo4j_uri,
+            auth=(self.neo4j_user, self.neo4j_password)
+        )
+
+        try:
+            update_count = 0
+            with driver.session() as session:
+                for comp_id, position in positions.items():
+                    orientation = orientations.get(comp_id, [0, 0, 0])
+
+                    # Ensure position is a list of 3 floats
+                    if isinstance(position, (list, tuple)) and len(position) >= 3:
+                        x, y, z = float(position[0]), float(position[1]), float(position[2])
+                    else:
+                        continue
+
+                    # Ensure orientation is a list of 3 floats
+                    if isinstance(orientation, (list, tuple)) and len(orientation) >= 3:
+                        rx, ry, rz = float(orientation[0]), float(orientation[1]), float(orientation[2])
+                    else:
+                        rx, ry, rz = 0.0, 0.0, 0.0
+
+                    session.run("""
+                        MATCH (c:Component {id: $comp_id})
+                        SET c.spatial_x = $x,
+                            c.spatial_y = $y,
+                            c.spatial_z = $z,
+                            c.orientation_x = $rx,
+                            c.orientation_y = $ry,
+                            c.orientation_z = $rz,
+                            c.spatial_method = 'genetic_algorithm',
+                            c.spatial_fitness = $fitness,
+                            c.spatial_timestamp = datetime()
+                        RETURN c.id
+                    """, {
+                        "comp_id": comp_id,
+                        "x": x, "y": y, "z": z,
+                        "rx": rx, "ry": ry, "rz": rz,
+                        "fitness": result.get("fitness_score", 0)
+                    })
+                    update_count += 1
+
+            return update_count
+        finally:
+            driver.close()
+
+    def _run_local_placement(self, components_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Fallback: Run local placement without learning-service (simple grid placement)"""
+        self.logger.log_stage("spatial", "Running fallback local placement...")
+
+        positions = {}
+        orientations = {}
+
+        # Simple grid-based placement
+        grid_spacing = 150  # mm between components
+        components_per_row = int(self.DEFAULT_WORKSPACE_BOUNDS[0] / grid_spacing)
+
+        for i, comp in enumerate(components_data):
+            row = i // components_per_row
+            col = i % components_per_row
+
+            x = col * grid_spacing + grid_spacing / 2
+            y = row * grid_spacing + grid_spacing / 2
+            z = 100  # Default height
+
+            positions[comp["id"]] = [x, y, z]
+            orientations[comp["id"]] = [0, 0, 0]
+
+        # Update Neo4j
+        update_count = self._update_components_spatial({
+            "positions": positions,
+            "orientations": orientations,
+            "fitness_score": 0.5  # Low fitness for simple grid
+        })
+
+        return {
+            "status": "completed",
+            "placement_solution": {
+                "positions": positions,
+                "orientations": orientations,
+                "fitness": 0.5,
+                "violations": ["Fallback grid placement used - learning-service unavailable"]
+            },
+            "algorithm_used": "fallback_grid",
+            "computation_time_ms": 0,
+            "components_placed": update_count,
+            "duration": 0
         }
 
 
